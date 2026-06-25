@@ -33,6 +33,7 @@ class Lead(Base):
     status = Column(String, default="not-called") # not-called, called, interested, closed, not-interested
     notes = Column(Text, nullable=True)
     follow_up_date = Column(DateTime, nullable=True)
+    years_in_business = Column(Integer, nullable=True)
 
     project = relationship("Project", back_populates="leads")
 

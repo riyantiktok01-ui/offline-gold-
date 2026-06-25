@@ -36,6 +36,10 @@ class SearchRequest(BaseModel):
     limit: Optional[int] = 50
     project_id: Optional[int] = None
 
+class BulkSearchRequest(BaseModel):
+    queries: List[SearchRequest]
+    project_id: int
+
 class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -213,6 +217,64 @@ def export_project_leads(id: int, db: Session = Depends(get_db)):
         headers={"Content-Disposition": f"attachment; filename=project_{id}_leads.csv"}
     )
 
+@app.post("/api/search/bulk")
+async def bulk_search_leads(request: BulkSearchRequest, db: Session = Depends(get_db)):
+    all_leads_data = []
+    seen_keys = set()
+    
+    for query in request.queries:
+        try:
+            leads_data = await scrape_google_maps(
+                niche=query.niche,
+                location=query.location,
+                limit=query.limit or 50
+            )
+            
+            for data in leads_data:
+                key = (data["name"].lower().strip(), data["address"].lower().strip())
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    all_leads_data.append(data)
+            
+            # Record search history for each query
+            search_history = models.SearchHistory(
+                niche=query.niche,
+                location=query.location,
+                results_count=len(leads_data)
+            )
+            db.add(search_history)
+            
+            # Small delay between queries to avoid rate limiting
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"Error in query {query}: {e}")
+            continue
+
+    saved_leads = []
+    for data in all_leads_data:
+        lead = models.Lead(
+            project_id=request.project_id,
+            name=data["name"],
+            phone=data.get("phone"),
+            address=data["address"],
+            category=data["category"],
+            rating=data["rating"],
+            reviews_count=data["reviews_count"],
+            website=data["website"],
+            years_in_business=data.get("years_in_business"),
+            closing_score=data["closing_score"]
+        )
+        db.add(lead)
+        saved_leads.append(lead)
+    
+    db.commit()
+    
+    return {
+        "queries_count": len(request.queries),
+        "total_results": len(all_leads_data),
+        "leads": saved_leads
+    }
+
 @app.post("/api/search")
 async def search_leads(request: SearchRequest, db: Session = Depends(get_db)):
     try:
@@ -244,6 +306,7 @@ async def search_leads(request: SearchRequest, db: Session = Depends(get_db)):
                     rating=data["rating"],
                     reviews_count=data["reviews_count"],
                     website=data["website"],
+                    years_in_business=data.get("years_in_business"),
                     closing_score=data["closing_score"]
                 )
                 db.add(lead)

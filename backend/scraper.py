@@ -1,6 +1,7 @@
 import asyncio
 import random
 import time
+import re
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 
@@ -16,6 +17,21 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
 ]
+
+def extract_years_in_business(text: str) -> int:
+    # Pattern 1: "X+ years in business"
+    match = re.search(r'(\d+)\+?\s+years? in business', text)
+    if match:
+        return int(match.group(1))
+    
+    # Pattern 2: "Est. YYYY"
+    match = re.search(r'Est\.\s+(\d{4})', text)
+    if match:
+        year = int(match.group(1))
+        # Using current year from system context (2026)
+        return 2026 - year
+        
+    return None
 
 def calculate_score(lead: Dict[str, Any]) -> int:
     score = 0
@@ -39,6 +55,11 @@ def calculate_score(lead: Dict[str, Any]) -> int:
     category = lead.get("category", "").lower()
     if any(fail_cat in category for fail_cat in HIGH_FAILURE_CATEGORIES):
         score += 15
+    
+    # Business age bonus: +10 for 5+ years
+    years = lead.get("years_in_business")
+    if years and years >= 5:
+        score += 10
         
     return score
 
@@ -200,6 +221,11 @@ async def scrape_google_maps(niche: str, location: str, limit: int = 50) -> List
                     continue
                 seen.add(key)
                 
+                # Years in business extraction
+                aria_label = await el.get_attribute("aria-label") or ""
+                combined_text = all_text + " " + aria_label
+                years_in_business = extract_years_in_business(combined_text)
+                
                 lead = {
                     "name": name,
                     "phone": phone,
@@ -208,6 +234,7 @@ async def scrape_google_maps(niche: str, location: str, limit: int = 50) -> List
                     "rating": rating,
                     "reviews_count": reviews_count,
                     "website": None,
+                    "years_in_business": years_in_business,
                     "closing_score": 0
                 }
                 
