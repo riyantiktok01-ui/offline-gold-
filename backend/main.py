@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -12,6 +13,7 @@ import datetime
 import io
 import csv
 import asyncio
+import os
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -259,6 +261,21 @@ async def search_leads(request: SearchRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+# Frontend Static Files
+FRONTEND_DIST = "/home/team/shared/frontend-dist"
+
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=f"{FRONTEND_DIST}/assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # If the path looks like an API call, it should have been caught by the API routes above
+        # If it doesn't exist as a file in FRONTEND_DIST, serve index.html
+        file_path = os.path.join(FRONTEND_DIST, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=3000)
