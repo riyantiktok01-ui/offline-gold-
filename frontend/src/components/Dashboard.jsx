@@ -239,7 +239,8 @@ export default function Dashboard({ projectId, searchResults }) {
             <p style={{ fontSize: '16px' }}>No leads found. Run a search to get started.</p>
           </div>
         ) : (
-          <table>
+          <div className="table-wrapper">
+          <table className="table-responsive">
             <thead>
               <tr>
                 <th onClick={() => handleSort('name')} className={sortField === 'name' ? 'sorted' : ''}>
@@ -334,6 +335,7 @@ export default function Dashboard({ projectId, searchResults }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

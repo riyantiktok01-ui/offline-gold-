@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, MapPin, SlidersHorizontal, Target } from 'lucide-react';
+import { Search, MapPin, SlidersHorizontal, Target, List, Layers } from 'lucide-react';
 import { searchLeads, getProjects, createProject } from '../api';
 import { useToast } from './Toast';
 
@@ -17,8 +17,10 @@ const NICHE_EXAMPLES = [
 ];
 
 export default function SearchPage({ onSearchComplete }) {
+  const [mode, setMode] = useState('single'); // 'single' | 'bulk'
   const [niche, setNiche] = useState('');
   const [location, setLocation] = useState('');
+  const [bulkQueries, setBulkQueries] = useState('');
   const [limit, setLimit] = useState(50);
   const [projectId, setProjectId] = useState('');
   const [projects, setProjects] = useState([]);
@@ -27,6 +29,8 @@ export default function SearchPage({ onSearchComplete }) {
   const [searching, setSearching] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [statusMessage, setStatusMessage] = useState('');
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  const [bulkResults, setBulkResults] = useState([]);
   const addToast = useToast();
 
   useEffect(() => {
@@ -53,7 +57,6 @@ export default function SearchPage({ onSearchComplete }) {
       setProgress({ current: 0, total: 0 });
       return;
     }
-    // Pulse status messages during search
     const messages = [
       'Scanning Google Maps...',
       'Finding offline businesses...',
@@ -79,7 +82,6 @@ export default function SearchPage({ onSearchComplete }) {
     setStatusMessage('Scanning Google Maps...');
     setProgress({ current: 0, total: limit });
 
-    // Animate progress smoothly
     const progressInterval = setInterval(() => {
       setProgress(prev => ({
         ...prev,
@@ -89,33 +91,81 @@ export default function SearchPage({ onSearchComplete }) {
 
     try {
       const result = await searchLeads(
-        niche.trim(),
-        location.trim(),
-        limit,
-        projectId ? Number(projectId) : null
+        niche.trim(), location.trim(), limit, projectId ? Number(projectId) : null
       );
-
       clearInterval(progressInterval);
       setProgress({ current: limit, total: limit });
 
       const leads = result.leads || result.results || result || [];
       const count = Array.isArray(leads) ? leads.length : 0;
-
-      addToast(
-        'Search Complete',
-        `Found ${count} offline businesses in ${location}`,
-        'success'
-      );
-
-      if (onSearchComplete) {
-        onSearchComplete(leads, result.project_id || projectId);
-      }
+      addToast('Search Complete', `Found ${count} offline businesses in ${location}`, 'success');
+      if (onSearchComplete) onSearchComplete(leads, result.project_id || projectId);
     } catch (err) {
       clearInterval(progressInterval);
       addToast('Search Failed', err.message, 'error');
     } finally {
       setSearching(false);
     }
+  };
+
+  const handleBulkSearch = async () => {
+    const lines = bulkQueries.trim().split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length === 0) {
+      addToast('Missing Queries', 'Enter at least one niche | location pair per line', 'error');
+      return;
+    }
+
+    const queries = lines.map(line => {
+      const parts = line.split('|').map(s => s.trim());
+      if (parts.length >= 2) return { niche: parts[0], location: parts[1] };
+      // Try splitting on comma or tab
+      const altParts = line.split(/[,]\s*/).map(s => s.trim());
+      if (altParts.length >= 2) return { niche: altParts[0], location: altParts[1] };
+      return null;
+    }).filter(Boolean);
+
+    if (queries.length === 0) {
+      addToast('Invalid Format', 'Use: Niche | Location (one per line)', 'error');
+      return;
+    }
+
+    setSearching(true);
+    setBulkProgress({ current: 0, total: queries.length });
+    setBulkResults([]);
+    setStatusMessage('Starting bulk search...');
+    const allLeads = [];
+
+    for (let i = 0; i < queries.length; i++) {
+      const q = queries[i];
+      setBulkProgress({ current: i + 1, total: queries.length });
+      setStatusMessage(`Search ${i + 1} of ${queries.length}: ${q.niche} in ${q.location}`);
+      setProgress({ current: 0, total: limit });
+
+      const progressInterval = setInterval(() => {
+        setProgress(prev => ({
+          ...prev,
+          current: Math.min(prev.current + Math.floor(Math.random() * 3) + 1, prev.total),
+        }));
+      }, 500);
+
+      try {
+        const result = await searchLeads(q.niche, q.location, limit, projectId ? Number(projectId) : null);
+        clearInterval(progressInterval);
+        setProgress({ current: limit, total: limit });
+        const leads = result.leads || result.results || result || [];
+        if (Array.isArray(leads)) allLeads.push(...leads);
+        addToast('Query Complete', `"${q.niche}" in ${q.location}: ${Array.isArray(leads) ? leads.length : 0} leads`, 'success');
+      } catch (err) {
+        clearInterval(progressInterval);
+        addToast('Query Failed', `${q.niche} in ${q.location}: ${err.message}`, 'error');
+      }
+    }
+
+    setBulkProgress({ current: queries.length, total: queries.length });
+    setStatusMessage('All searches complete!');
+    addToast('Bulk Search Complete', `Found ${allLeads.length} total leads across ${queries.length} searches`, 'success');
+    setSearching(false);
+    if (onSearchComplete) onSearchComplete(allLeads, projectId || null);
   };
 
   const progressPct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
@@ -127,148 +177,109 @@ export default function SearchPage({ onSearchComplete }) {
           <h2 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
             New Search
           </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '28px' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '20px' }}>
             Find offline businesses without websites — easy to convert leads.
           </p>
 
-          {/* Niche Input */}
-          <div className="form-group">
-            <label className="form-label">
-              <Target size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-              Niche / Business Type
-            </label>
-            <input
-              className="form-input"
-              placeholder="e.g. Pool Services, Roofing, Plumbers..."
-              value={niche}
-              onChange={e => setNiche(e.target.value)}
-              disabled={searching}
-              list="niche-suggestions"
-            />
-            <datalist id="niche-suggestions">
-              {NICHE_EXAMPLES.map(n => <option key={n} value={n} />)}
-            </datalist>
+          {/* Mode Toggle */}
+          <div className="toggle-group" style={{ marginBottom: '24px', width: 'fit-content' }}>
+            <button className={`toggle-btn ${mode === 'single' ? 'active' : ''}`} onClick={() => setMode('single')}>
+              <Search size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+              Single Search
+            </button>
+            <button className={`toggle-btn ${mode === 'bulk' ? 'active' : ''}`} onClick={() => setMode('bulk')}>
+              <Layers size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+              Bulk Search
+            </button>
           </div>
 
-          {/* Location Input */}
-          <div className="form-group">
-            <label className="form-label">
-              <MapPin size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-              Location
-            </label>
-            <input
-              className="form-input"
-              placeholder="e.g. Austin, TX"
-              value={location}
-              onChange={e => setLocation(e.target.value)}
-              disabled={searching}
-              list="location-suggestions"
-            />
-            <datalist id="location-suggestions">
-              {LOCATIONS.map(l => <option key={l} value={l} />)}
-            </datalist>
-          </div>
-
-          {/* Limit + Project Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div className="form-group">
-              <label className="form-label">
-                <SlidersHorizontal size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-                Max Results
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input
-                  type="range"
-                  min={10}
-                  max={200}
-                  step={10}
-                  value={limit}
-                  onChange={e => setLimit(Number(e.target.value))}
-                  disabled={searching}
-                  style={{ flex: 1, accentColor: '#F59E0B' }}
-                />
-                <span style={{
-                  background: 'var(--bg-tertiary)',
-                  padding: '4px 12px',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  color: 'var(--gold)',
-                  minWidth: '40px',
-                  textAlign: 'center',
-                }}>
-                  {limit}
-                </span>
+          {mode === 'single' ? (
+            <>
+              {/* Niche Input */}
+              <div className="form-group">
+                <label className="form-label">
+                  <Target size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                  Niche / Business Type
+                </label>
+                <input className="form-input" placeholder="e.g. Pool Services, Roofing, Plumbers..." value={niche} onChange={e => setNiche(e.target.value)} disabled={searching} list="niche-suggestions" />
+                <datalist id="niche-suggestions">{NICHE_EXAMPLES.map(n => <option key={n} value={n} />)}</datalist>
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Project (optional)</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <select
-                  className="form-select"
-                  value={projectId}
-                  onChange={e => setProjectId(e.target.value)}
+              {/* Location Input */}
+              <div className="form-group">
+                <label className="form-label">
+                  <MapPin size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                  Location
+                </label>
+                <input className="form-input" placeholder="e.g. Austin, TX" value={location} onChange={e => setLocation(e.target.value)} disabled={searching} list="location-suggestions" />
+                <datalist id="location-suggestions">{LOCATIONS.map(l => <option key={l} value={l} />)}</datalist>
+              </div>
+
+              {/* Limit + Project Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label"><SlidersHorizontal size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />Max Results</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <input type="range" min={10} max={200} step={10} value={limit} onChange={e => setLimit(Number(e.target.value))} disabled={searching} style={{ flex: 1, accentColor: '#F59E0B' }} />
+                    <span style={{ background: 'var(--bg-tertiary)', padding: '4px 12px', borderRadius: 'var(--radius-md)', fontSize: '14px', fontWeight: 600, color: 'var(--gold)', minWidth: '40px', textAlign: 'center' }}>{limit}</span>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Project (optional)</label>
+                  <select className="form-select" value={projectId} onChange={e => setProjectId(e.target.value)} disabled={searching} style={{ flex: 1 }}>
+                    <option value="">No project</option>
+                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  {!showNewProject ? (
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowNewProject(true)} style={{ marginTop: '6px' }} disabled={searching}>+ New Project</button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                      <input className="form-input" placeholder="Project name..." value={newProjectName} onChange={e => setNewProjectName(e.target.value)} style={{ flex: 1 }} autoFocus />
+                      <button className="btn btn-primary btn-sm" onClick={handleCreateProject}>Create</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setShowNewProject(false)}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button className="btn btn-primary" onClick={handleSearch} disabled={searching} style={{ width: '100%', justifyContent: 'center', padding: '14px 24px', fontSize: '16px', marginTop: '8px' }}>
+                {searching ? <><span className="loading-spinner" />{statusMessage}</> : <><Search size={18} /> Search Offline Businesses</>}
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Bulk Search */}
+              <div className="form-group">
+                <label className="form-label">
+                  <List size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                  Bulk Queries (one per line — Niche | Location)
+                </label>
+                <textarea
+                  className="form-textarea"
+                  placeholder={`Pool Services | Austin, TX\nRoofing | Dallas, TX\nPlumbers | Houston, TX\nLandscaping | Phoenix, AZ`}
+                  value={bulkQueries}
+                  onChange={e => setBulkQueries(e.target.value)}
                   disabled={searching}
-                  style={{ flex: 1 }}
-                >
-                  <option value="">No project (quick search)</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  style={{ minHeight: '160px', fontFamily: 'var(--font-mono)', fontSize: '13px' }}
+                />
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Format: <strong>Niche | Location</strong> (one query per line)
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Project (optional)</label>
+                <select className="form-select" value={projectId} onChange={e => setProjectId(e.target.value)} disabled={searching}>
+                  <option value="">No project</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
-              {!showNewProject ? (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setShowNewProject(true)}
-                  style={{ marginTop: '6px' }}
-                  disabled={searching}
-                >
-                  + New Project
-                </button>
-              ) : (
-                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                  <input
-                    className="form-input"
-                    placeholder="Project name..."
-                    value={newProjectName}
-                    onChange={e => setNewProjectName(e.target.value)}
-                    style={{ flex: 1 }}
-                    autoFocus
-                  />
-                  <button className="btn btn-primary btn-sm" onClick={handleCreateProject}>Create</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setShowNewProject(false)}>Cancel</button>
-                </div>
-              )}
-            </div>
-          </div>
 
-          {/* Search Button */}
-          <button
-            className="btn btn-primary"
-            onClick={handleSearch}
-            disabled={searching}
-            style={{
-              width: '100%',
-              justifyContent: 'center',
-              padding: '14px 24px',
-              fontSize: '16px',
-              marginTop: '8px',
-            }}
-          >
-            {searching ? (
-              <>
-                <span className="loading-spinner" />
-                {statusMessage}
-              </>
-            ) : (
-              <>
-                <Search size={18} />
-                Search Offline Businesses
-              </>
-            )}
-          </button>
+              <button className="btn btn-primary" onClick={handleBulkSearch} disabled={searching} style={{ width: '100%', justifyContent: 'center', padding: '14px 24px', fontSize: '16px', marginTop: '8px' }}>
+                {searching ? <><span className="loading-spinner" />{statusMessage}</> : <><Layers size={18} /> Run All Queries</>}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -276,13 +287,22 @@ export default function SearchPage({ onSearchComplete }) {
       {searching && (
         <div className="loading-container animate-fade-in">
           <div className="loading-scanner">
-            <div className="loading-scanner-map">
-              <MapPin size={48} />
-            </div>
+            <div className="loading-scanner-map"><MapPin size={48} /></div>
             <div className="loading-scanner-line" />
           </div>
-
           <div className="loading-text">{statusMessage}</div>
+
+          {mode === 'bulk' && (
+            <div style={{ width: '100%', maxWidth: '400px', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                <span>Search {bulkProgress.current} of {bulkProgress.total}</span>
+                <span>{bulkProgress.total > 0 ? Math.round((bulkProgress.current / bulkProgress.total) * 100) : 0}%</span>
+              </div>
+              <div className="progress-bar-container" style={{ height: '6px' }}>
+                <div className="progress-bar-fill" style={{ width: `${bulkProgress.total > 0 ? (bulkProgress.current / bulkProgress.total) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
 
           <div style={{ width: '100%', maxWidth: '400px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
@@ -295,7 +315,7 @@ export default function SearchPage({ onSearchComplete }) {
           </div>
 
           <div className="loading-subtext">
-            Searching for "{niche}" in {location}...
+            {mode === 'single' ? `Searching for "${niche}" in ${location}...` : 'Processing bulk queries...'}
           </div>
         </div>
       )}

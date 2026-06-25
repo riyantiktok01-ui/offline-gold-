@@ -11,7 +11,7 @@ const navItems = [
 
 const PROJECT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
-export default function Sidebar({ collapsed, onToggle, activeNav, onNavChange, onSelectProject, selectedProjectId }) {
+export default function Sidebar({ collapsed, onToggle, activeNav, onNavChange, onSelectProject, selectedProjectId, sidebarOpen }) {
   const [projects, setProjects] = useState([]);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -44,7 +44,7 @@ export default function Sidebar({ collapsed, onToggle, activeNav, onNavChange, o
   };
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${sidebarOpen ? 'open' : ''}`}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">OG</div>
         <span className="sidebar-logo-text">OfflineGold</span>
